@@ -279,6 +279,3 @@ Sheet Operator → update Google Sheets tracker
     └── Action Type: "None" / Rejected → Log silently
 ```
 
-## License
-
-MIT
