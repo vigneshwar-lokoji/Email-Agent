@@ -48,6 +48,7 @@ async def _dispatch_callback(
         handle_followup_draft,
         handle_followup_dismiss,
         handle_clear_all_reminders,
+        send_insights,
     )
 
     # ── Initial decision buttons ─────────────────────────────────────────────
@@ -111,6 +112,10 @@ async def _dispatch_callback(
 
     elif data.startswith("FOLLOWUP_DISMISS:"):
         await handle_followup_dismiss(int(data.split(":")[1]))
+
+    elif data.startswith("INSIGHTS:"):
+        period = data.split(":")[1]
+        await send_insights(period)
 
 
 async def listen():
@@ -214,6 +219,14 @@ async def listen():
                     except Exception as e:
                         print(f"   Error checking followups: {e}")
 
+                elif "insight" in text.lower() or "analyze" in text.lower() or "analyse" in text.lower():
+                    print(f"[Command] Insights menu requested.")
+                    from orchestrator import send_insights_menu
+                    try:
+                        await send_insights_menu()
+                    except Exception as e:
+                        print(f"   Error sending insights menu: {e}")
+
                 elif "dashboard" in text.lower() or "stats" in text.lower():
                     print(f"[Command] Dashboard requested.")
                     from orchestrator import send_dashboard
@@ -252,6 +265,7 @@ async def listen():
                         "📬 *reminders* — pending action items\n"
                         "🧹 *clear reminders* — dismiss all reminders\n"
                         "⏰ *followup* — check stale threads\n"
+                        "📈 *insights* / *analyze* — activity breakdown (today/week/month)\n"
                         "📊 *dashboard* / *stats* — job search pipeline\n"
                         "⚡ *response time* / *speed* — reply speed stats\n"
                         "☀️ *brief* / *morning* — daily summary\n"

@@ -828,6 +828,111 @@ async def send_digest():
     await send_reminder_update()
 
 
+# ── Insights (time-windowed analytics) ──────────────────────────────────────
+
+PERIOD_LABELS = {
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "week": "This Week",
+    "month": "This Month",
+}
+
+
+async def send_insights_menu():
+    """Send Telegram message with time-window buttons."""
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    _tg(
+        "sendMessage",
+        chat_id=chat_id,
+        text="Pick a time window for your insights:",
+        reply_markup={
+            "inline_keyboard": [
+                [{"text": "Today",     "callback_data": "INSIGHTS:today"}],
+                [{"text": "Yesterday", "callback_data": "INSIGHTS:yesterday"}],
+                [{"text": "This Week", "callback_data": "INSIGHTS:week"}],
+                [{"text": "This Month","callback_data": "INSIGHTS:month"}],
+            ]
+        },
+    )
+
+
+async def send_insights(period: str):
+    """Send time-windowed analytics to Telegram."""
+    from db import get_insights_for_period
+    from action_nodes import get_sheet_stats_for_period
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    label = PERIOD_LABELS.get(period, period)
+
+    _tg("sendMessage", chat_id=chat_id, text=f"Crunching your {label.lower()} numbers...")
+
+    # Get DB stats (email activity)
+    activity = await get_insights_for_period(period)
+
+    # Get sheet stats (job applications) — runs in thread since it's sync
+    job_stats = await asyncio.to_thread(get_sheet_stats_for_period, period)
+
+    lines = [f"📊 *Insights — {label}*\n"]
+
+    # ── Email Activity ──
+    lines.append("*Email Activity:*")
+    lines.append(f"  📬 {activity['emails_received']} received")
+    lines.append(f"  ✅ {activity['emails_handled']} handled")
+    if activity['emails_pending']:
+        lines.append(f"  ⏳ {activity['emails_pending']} still pending")
+    lines.append(f"  ✉️ {activity['replies_sent']} replies sent")
+
+    # Breakdown by category
+    if activity['by_category']:
+        cats = activity['by_category']
+        cat_parts = []
+        cat_emojis = {"job": "💼", "personal": "👤", "bank": "🏦", "business": "📎", "study": "📚", "advertisement": "📢"}
+        for cat, count in sorted(cats.items(), key=lambda x: x[1], reverse=True):
+            emoji = cat_emojis.get(cat, "📧")
+            cat_parts.append(f"{emoji} {cat}: {count}")
+        lines.append(f"  _Breakdown: {' | '.join(cat_parts)}_")
+    lines.append("")
+
+    # ── Reminders ──
+    if activity['reminders_added'] or activity['reminders_cleared']:
+        lines.append("*Reminders:*")
+        lines.append(f"  📋 {activity['reminders_added']} added")
+        lines.append(f"  🧹 {activity['reminders_cleared']} cleared")
+        lines.append("")
+
+    # ── Job Search ──
+    if "error" not in job_stats:
+        lines.append("*Job Search:*")
+        lines.append(f"  📝 {job_stats['applied']} applications tracked")
+        lines.append(f"  ❌ {job_stats['rejections']} rejected")
+        lines.append(f"  ✅ {job_stats['next_round']} advancing to next round")
+
+        if job_stats['advancing_companies']:
+            lines.append("\n  *Moving forward:*")
+            for item in job_stats['advancing_companies'][:5]:
+                lines.append(f"    🟢 {item['company']} — _{item['stage']}_")
+
+        if job_stats['rejection_companies']:
+            lines.append("\n  *Rejections:*")
+            for item in job_stats['rejection_companies'][:5]:
+                reason = item['reason'] if item['reason'] != 'N/A' else 'No reason given'
+                lines.append(f"    🔴 {item['company']} at _{item['stage']}_ — {reason}")
+            if len(job_stats['rejection_companies']) > 5:
+                lines.append(f"    ... and {len(job_stats['rejection_companies']) - 5} more")
+
+        lines.append("")
+
+    # ── Summary ──
+    if activity['emails_received'] == 0 and (job_stats.get('applied', 0) == 0):
+        lines.append(f"_Quiet {label.lower()} — no activity recorded._")
+
+    _tg(
+        "sendMessage",
+        chat_id=chat_id,
+        text="\n".join(lines),
+        parse_mode="Markdown",
+    )
+
+
 # ── Job Search Dashboard ─────────────────────────────────────────────────────
 
 async def send_dashboard():

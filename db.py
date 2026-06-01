@@ -195,6 +195,92 @@ async def get_weekly_activity() -> dict:
         }
 
 
+async def get_insights_for_period(period: str) -> dict:
+    """Get email activity stats for a specific time window.
+    period: 'today', 'yesterday', 'week', 'month'
+    """
+    # SQLite date expressions for each window
+    date_filters = {
+        "today":     ("date('now', 'start of day')", None),
+        "yesterday": ("date('now', '-1 day', 'start of day')", "date('now', 'start of day')"),
+        "week":      ("date('now', 'weekday 1', '-7 days')", None),
+        "month":     ("date('now', 'start of month')", None),
+    }
+
+    start_expr, end_expr = date_filters.get(period, date_filters["today"])
+    if end_expr:
+        time_clause = f"BETWEEN {start_expr} AND {end_expr}"
+    else:
+        time_clause = f">= {start_expr}"
+
+    async with aiosqlite.connect(DB_PATH) as conn:
+        # Emails received
+        cursor = await conn.execute(
+            f"SELECT COUNT(*) FROM pending_decisions WHERE created_at {time_clause}"
+        )
+        emails_received = (await cursor.fetchone())[0]
+
+        # Emails handled (any non-pending status)
+        cursor = await conn.execute(
+            f"""SELECT COUNT(*) FROM pending_decisions
+                WHERE resolved_at IS NOT NULL AND status != 'PENDING'
+                  AND resolved_at {time_clause}"""
+        )
+        emails_handled = (await cursor.fetchone())[0]
+
+        # Emails still pending from this window
+        cursor = await conn.execute(
+            f"""SELECT COUNT(*) FROM pending_decisions
+                WHERE status = 'PENDING' AND created_at {time_clause}"""
+        )
+        emails_pending = (await cursor.fetchone())[0]
+
+        # Replies sent
+        cursor = await conn.execute(
+            f"SELECT COUNT(*) FROM sent_replies WHERE sent_at {time_clause}"
+        )
+        replies_sent = (await cursor.fetchone())[0]
+
+        # Replies by category
+        cursor = await conn.execute(
+            f"""SELECT category, COUNT(*) FROM sent_replies
+                WHERE sent_at {time_clause} GROUP BY category"""
+        )
+        replies_by_cat = dict(await cursor.fetchall())
+
+        # Reminders added
+        cursor = await conn.execute(
+            f"SELECT COUNT(*) FROM pending_replies WHERE created_at {time_clause}"
+        )
+        reminders_added = (await cursor.fetchone())[0]
+
+        # Reminders cleared
+        cursor = await conn.execute(
+            f"""SELECT COUNT(*) FROM pending_replies
+                WHERE resolved_at IS NOT NULL AND resolved_at {time_clause}
+                  AND status IN ('ACTION_TAKEN', 'CLEARED', 'IGNORED')"""
+        )
+        reminders_cleared = (await cursor.fetchone())[0]
+
+        # Emails by category
+        cursor = await conn.execute(
+            f"""SELECT category, COUNT(*) FROM pending_decisions
+                WHERE created_at {time_clause} GROUP BY category"""
+        )
+        by_category = dict(await cursor.fetchall())
+
+        return {
+            "emails_received": emails_received,
+            "emails_handled": emails_handled,
+            "emails_pending": emails_pending,
+            "replies_sent": replies_sent,
+            "replies_by_category": replies_by_cat,
+            "reminders_added": reminders_added,
+            "reminders_cleared": reminders_cleared,
+            "by_category": by_category,
+        }
+
+
 async def get_pending_decisions_older_than(hours: int = 3) -> list[dict]:
     """Find pending decisions that have been waiting longer than N hours."""
     async with aiosqlite.connect(DB_PATH) as conn:

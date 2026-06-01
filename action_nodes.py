@@ -101,6 +101,91 @@ def get_dashboard_stats() -> dict:
     }
 
 
+def get_sheet_stats_for_period(period: str) -> dict:
+    """Get job application stats from the tracker sheet for a time window.
+    period: 'today', 'yesterday', 'week', 'month'
+    """
+    from datetime import datetime, timedelta, date
+
+    today = date.today()
+    if period == "today":
+        start_date = today
+        end_date = today
+    elif period == "yesterday":
+        start_date = today - timedelta(days=1)
+        end_date = today - timedelta(days=1)
+    elif period == "week":
+        start_date = today - timedelta(days=today.weekday())  # Monday
+        end_date = today
+    elif period == "month":
+        start_date = today.replace(day=1)
+        end_date = today
+    else:
+        start_date = today
+        end_date = today
+
+    try:
+        sheet = client.open(SHEET_NAME).sheet1
+        rows = sheet.get_all_records()
+    except Exception as e:
+        return {"error": str(e)}
+
+    if not rows:
+        return {"applied": 0, "rejections": 0, "next_round": 0, "companies": [], "rejection_companies": [], "advancing_companies": []}
+
+    applied = 0
+    rejections = 0
+    next_round = 0
+    companies = []
+    rejection_companies = []
+    advancing_companies = []
+
+    advancing_stages = {"Recruiter Screen", "Phone Screen", "OA", "Technical Round",
+                        "System Design", "Behavioral", "Onsite", "Final Round", "Offer Stage"}
+
+    for row in rows:
+        date_str = str(row.get("Date Received", "")).strip()
+        if not date_str or date_str == "N/A":
+            continue
+
+        # Parse the date (try common formats)
+        row_date = None
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d", "%m-%d-%Y"):
+            try:
+                row_date = datetime.strptime(date_str, fmt).date()
+                break
+            except ValueError:
+                continue
+
+        if not row_date or not (start_date <= row_date <= end_date):
+            continue
+
+        applied += 1
+        company = row.get("Company Name", "N/A")
+        stage = row.get("Current Stage", "N/A")
+        status = row.get("Final Status", "N/A")
+
+        if company and company != "N/A":
+            companies.append(company)
+
+        if status == "Rejected":
+            rejections += 1
+            reason = row.get("Reject Reason Category", "N/A")
+            rejection_companies.append({"company": company, "stage": stage, "reason": reason})
+        elif stage in advancing_stages:
+            next_round += 1
+            advancing_companies.append({"company": company, "stage": stage})
+
+    return {
+        "applied": applied,
+        "rejections": rejections,
+        "next_round": next_round,
+        "companies": companies,
+        "rejection_companies": rejection_companies,
+        "advancing_companies": advancing_companies,
+    }
+
+
 def sheet_operator_node(state: AgentState):
     print("⚙️ Agent 4: Executing full 20-column Sheet Operation...")
     
