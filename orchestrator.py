@@ -42,6 +42,7 @@ from db import (
     get_pending_decision,
     resolve_pending_decision,
     log_sent_reply,
+    log_email_processed,
     get_stale_threads,
     mark_followup_notified,
     mark_response_received,
@@ -173,15 +174,28 @@ def _run_graph(email_data: dict) -> dict:
 
 # ── Phase A: classify + route ──────────────────────────────────────────────────
 
+def _log_email(email_data: dict, category: str, action: str):
+    """Log every email to both SQLite (email_log) and Google Sheet (Usage tab)."""
+    try:
+        asyncio.run(log_email_processed(
+            gmail_message_id=email_data.get("message_id", ""),
+            sender_email=email_data.get("sender_email", ""),
+            subject=email_data.get("subject", ""),
+            category=category,
+            action_taken=action,
+        ))
+    except Exception as e:
+        print(f"   [email_log] DB error: {e}")
+    try:
+        log_usage_event("received")
+        log_usage_event("processed", category)
+    except Exception:
+        pass
+
+
 def run_phase_a(email_data: dict):
     """Classify one email and route it to either direct draft or reminders."""
     print(f"[Phase A] {email_data['subject']}")
-
-    # Log email received
-    try:
-        log_usage_event("received")
-    except Exception:
-        pass
 
     # If we previously replied to this thread, mark that we got a response
     asyncio.run(mark_response_received(email_data["thread_id"]))
@@ -192,14 +206,9 @@ def run_phase_a(email_data: dict):
 
     category = final.get("email_category", "spam")
 
-    # Log processed with category
-    try:
-        log_usage_event("processed", category)
-    except Exception:
-        pass
-
     if category == "spam":
         print("   Spam. Ignored.")
+        _log_email(email_data, "spam", "ignored")
         _mark_processed(email_data)
         return
 
@@ -212,6 +221,7 @@ def run_phase_a(email_data: dict):
             print("   Labelled: Advertisements")
         except Exception as e:
             print(f"   Label error: {e}")
+        _log_email(email_data, "advertisement", "labelled")
         _mark_processed(email_data)
         return
 
@@ -219,6 +229,13 @@ def run_phase_a(email_data: dict):
         _route_job_email(email_data, final)
     else:
         _route_general_email(email_data, final, category)
+
+    # Determine action for logging
+    action = final.get("general_action", "")
+    if category == "job":
+        ext = final.get("extracted_data", {})
+        action = ext.get("Action Type", "logged")
+    _log_email(email_data, category, action or "processed")
 
     # Apply Gmail category label
     label_name = _gmail_label_for(category, final)

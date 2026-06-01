@@ -80,6 +80,35 @@ async def init_db():
                 response_received_at TEXT
             )
         """)
+        # Log every email processed (for accurate stats)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS email_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                gmail_message_id TEXT NOT NULL,
+                sender_email TEXT DEFAULT '',
+                subject TEXT DEFAULT '',
+                category TEXT DEFAULT '',
+                action_taken TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.commit()
+
+
+async def log_email_processed(
+    gmail_message_id: str,
+    sender_email: str,
+    subject: str,
+    category: str,
+    action_taken: str,
+) -> None:
+    """Record every email processed, regardless of whether it triggers a notification."""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute(
+            """INSERT INTO email_log (gmail_message_id, sender_email, subject, category, action_taken)
+               VALUES (?, ?, ?, ?, ?)""",
+            (gmail_message_id, sender_email, subject, category, action_taken),
+        )
         await conn.commit()
 
 
@@ -155,35 +184,33 @@ async def dismiss_followup(sent_reply_id: int) -> None:
 async def get_weekly_activity() -> dict:
     """Get this week's email activity stats (Mon-Sun)."""
     async with aiosqlite.connect(DB_PATH) as conn:
-        # Emails received this week
+        week_clause = ">= date('now', 'weekday 1', '-7 days')"
+
+        # Emails received (from email_log)
         cursor = await conn.execute(
-            """SELECT COUNT(*) FROM pending_decisions
-               WHERE created_at >= date('now', 'weekday 1', '-7 days')"""
+            f"SELECT COUNT(*) FROM email_log WHERE created_at {week_clause}"
         )
         emails_received = (await cursor.fetchone())[0]
 
-        # Emails handled this week
+        # Emails that got a notification (user needed to act)
         cursor = await conn.execute(
-            """SELECT COUNT(*) FROM pending_decisions
-               WHERE resolved_at IS NOT NULL
-                 AND resolved_at >= date('now', 'weekday 1', '-7 days')
-                 AND status NOT IN ('PENDING')"""
+            f"""SELECT COUNT(*) FROM pending_decisions
+                WHERE resolved_at IS NOT NULL AND status != 'PENDING'
+                  AND resolved_at {week_clause}"""
         )
         emails_handled = (await cursor.fetchone())[0]
 
-        # Replies sent this week
+        # Replies sent
         cursor = await conn.execute(
-            """SELECT COUNT(*) FROM sent_replies
-               WHERE sent_at >= date('now', 'weekday 1', '-7 days')"""
+            f"SELECT COUNT(*) FROM sent_replies WHERE sent_at {week_clause}"
         )
         replies_sent = (await cursor.fetchone())[0]
 
-        # Reminders cleared this week
+        # Reminders cleared
         cursor = await conn.execute(
-            """SELECT COUNT(*) FROM pending_replies
-               WHERE resolved_at IS NOT NULL
-                 AND resolved_at >= date('now', 'weekday 1', '-7 days')
-                 AND status IN ('ACTION_TAKEN', 'CLEARED', 'IGNORED')"""
+            f"""SELECT COUNT(*) FROM pending_replies
+                WHERE resolved_at IS NOT NULL AND resolved_at {week_clause}
+                  AND status IN ('ACTION_TAKEN', 'CLEARED', 'IGNORED')"""
         )
         reminders_cleared = (await cursor.fetchone())[0]
 
@@ -199,7 +226,6 @@ async def get_insights_for_period(period: str) -> dict:
     """Get email activity stats for a specific time window.
     period: 'today', 'yesterday', 'week', 'month'
     """
-    # SQLite date expressions for each window
     date_filters = {
         "today":     ("date('now', 'start of day')", None),
         "yesterday": ("date('now', '-1 day', 'start of day')", "date('now', 'start of day')"),
@@ -214,13 +240,27 @@ async def get_insights_for_period(period: str) -> dict:
         time_clause = f">= {start_expr}"
 
     async with aiosqlite.connect(DB_PATH) as conn:
-        # Emails received
+        # Total emails received (from email_log — counts ALL emails)
         cursor = await conn.execute(
-            f"SELECT COUNT(*) FROM pending_decisions WHERE created_at {time_clause}"
+            f"SELECT COUNT(*) FROM email_log WHERE created_at {time_clause}"
         )
         emails_received = (await cursor.fetchone())[0]
 
-        # Emails handled (any non-pending status)
+        # Emails by category (from email_log)
+        cursor = await conn.execute(
+            f"""SELECT category, COUNT(*) FROM email_log
+                WHERE created_at {time_clause} GROUP BY category"""
+        )
+        by_category = dict(await cursor.fetchall())
+
+        # Emails by action taken
+        cursor = await conn.execute(
+            f"""SELECT action_taken, COUNT(*) FROM email_log
+                WHERE created_at {time_clause} GROUP BY action_taken"""
+        )
+        by_action = dict(await cursor.fetchall())
+
+        # Emails that needed user decision and were handled
         cursor = await conn.execute(
             f"""SELECT COUNT(*) FROM pending_decisions
                 WHERE resolved_at IS NOT NULL AND status != 'PENDING'
@@ -228,7 +268,7 @@ async def get_insights_for_period(period: str) -> dict:
         )
         emails_handled = (await cursor.fetchone())[0]
 
-        # Emails still pending from this window
+        # Emails still pending decision
         cursor = await conn.execute(
             f"""SELECT COUNT(*) FROM pending_decisions
                 WHERE status = 'PENDING' AND created_at {time_clause}"""
@@ -262,13 +302,6 @@ async def get_insights_for_period(period: str) -> dict:
         )
         reminders_cleared = (await cursor.fetchone())[0]
 
-        # Emails by category
-        cursor = await conn.execute(
-            f"""SELECT category, COUNT(*) FROM pending_decisions
-                WHERE created_at {time_clause} GROUP BY category"""
-        )
-        by_category = dict(await cursor.fetchall())
-
         return {
             "emails_received": emails_received,
             "emails_handled": emails_handled,
@@ -278,6 +311,7 @@ async def get_insights_for_period(period: str) -> dict:
             "reminders_added": reminders_added,
             "reminders_cleared": reminders_cleared,
             "by_category": by_category,
+            "by_action": by_action,
         }
 
 
