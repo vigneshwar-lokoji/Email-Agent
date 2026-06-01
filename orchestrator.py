@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 from graph import app
+from action_nodes import log_usage_event
 from gmail_service import (
     get_gmail_service,
     get_or_create_processed_label,
@@ -176,6 +177,12 @@ def run_phase_a(email_data: dict):
     """Classify one email and route it to either direct draft or reminders."""
     print(f"[Phase A] {email_data['subject']}")
 
+    # Log email received
+    try:
+        log_usage_event("received")
+    except Exception:
+        pass
+
     # If we previously replied to this thread, mark that we got a response
     asyncio.run(mark_response_received(email_data["thread_id"]))
 
@@ -184,6 +191,12 @@ def run_phase_a(email_data: dict):
     is_job_related = final.get("is_job_related", False)
 
     category = final.get("email_category", "spam")
+
+    # Log processed with category
+    try:
+        log_usage_event("processed", category)
+    except Exception:
+        pass
 
     if category == "spam":
         print("   Spam. Ignored.")
@@ -453,6 +466,10 @@ async def handle_send_own_initial(telegram_message_id: int):
                approval["sender_email"], approval["subject"], approval["draft_body"])
     _tg("sendMessage", chat_id=chat_id,
         text=f"Sent to {approval['sender_email']}.")
+    try:
+        log_usage_event("sent")
+    except Exception:
+        pass
     await log_sent_reply(
         gmail_thread_id=approval["gmail_thread_id"],
         gmail_message_id=approval["gmail_message_id"],
@@ -603,6 +620,11 @@ def _draft_and_notify(email_data: dict, extracted: dict, final_state: dict):
     stage = extracted.get("Current Stage", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
+    try:
+        log_usage_event("draft")
+    except Exception:
+        pass
+
     keyboard = {
         "inline_keyboard": [
             [{"text": "Approve (Send)",    "callback_data": "APPROVE"}],
@@ -661,6 +683,11 @@ def _draft_and_notify_general(email_data: dict, summary: str, category: str):
     draft_body = state.get("draft_body", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
+    try:
+        log_usage_event("draft")
+    except Exception:
+        pass
+
     resp = _tg(
         "sendMessage",
         chat_id=chat_id,
@@ -714,6 +741,10 @@ async def _queue_reminder(
         priority=priority,
         action_type=action_type,
     )
+    try:
+        log_usage_event("reminder_add")
+    except Exception:
+        pass
 
     # High-priority job items → notify immediately, don't wait for user to ask
     if priority == "High":
@@ -1402,6 +1433,10 @@ async def handle_action_taken(reply_id: int):
     await resolve_pending_reply(reply_id, "ACTION_TAKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     _tg("sendMessage", chat_id=chat_id, text="Marked as done.")
+    try:
+        log_usage_event("reminder_clear")
+    except Exception:
+        pass
     await send_reminder_update()
 
 
@@ -1409,6 +1444,10 @@ async def handle_ignore(reply_id: int):
     await resolve_pending_reply(reply_id, "IGNORED")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     _tg("sendMessage", chat_id=chat_id, text="Dismissed from queue.")
+    try:
+        log_usage_event("reminder_clear")
+    except Exception:
+        pass
     await send_reminder_update()
 
 
@@ -1418,6 +1457,11 @@ async def handle_clear_all_reminders():
     count = await clear_all_reminders()
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if count:
+        try:
+            for _ in range(count):
+                log_usage_event("reminder_clear")
+        except Exception:
+            pass
         _tg("sendMessage", chat_id=chat_id, text=f"Cleared {count} reminder(s). You're all caught up!")
     else:
         _tg("sendMessage", chat_id=chat_id, text="No reminders to clear.")
@@ -1545,6 +1589,10 @@ async def run_phase_b(telegram_message_id: int, decision: str, feedback_text: st
         note = f" (auto-added: {', '.join(changes)})" if changes else ""
         _tg("sendMessage", chat_id=chat_id,
             text=f"Your message sent to {approval['sender_email']}{note}.")
+        try:
+            log_usage_event("sent")
+        except Exception:
+            pass
         await log_sent_reply(
             gmail_thread_id=approval["gmail_thread_id"],
             gmail_message_id=approval["gmail_message_id"],
@@ -1563,6 +1611,10 @@ async def run_phase_b(telegram_message_id: int, decision: str, feedback_text: st
         send_reply(service, approval["gmail_thread_id"], approval["gmail_message_id"],
                    approval["sender_email"], approval["subject"], draft_body)
         _tg("sendMessage", chat_id=chat_id, text=f"Sent to {approval['sender_email']}.")
+        try:
+            log_usage_event("sent")
+        except Exception:
+            pass
         await log_sent_reply(
             gmail_thread_id=approval["gmail_thread_id"],
             gmail_message_id=approval["gmail_message_id"],

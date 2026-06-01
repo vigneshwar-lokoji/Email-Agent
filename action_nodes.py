@@ -284,3 +284,106 @@ def telegram_notifier_node(state: AgentState):
 
     print(f"   Telegram message sent (id: {tg_message_id}). Returning immediately.")
     return {"telegram_message_id": tg_message_id}
+
+
+# ── Usage Tracker (Google Sheet) ────────────────────────────────────────────
+
+USAGE_HEADERS = [
+    "Date",
+    "Emails Received",
+    "Emails Processed",
+    "Job",
+    "Personal",
+    "Business",
+    "Bank",
+    "Study",
+    "Advertisement",
+    "Spam",
+    "Replies Drafted by Agent",
+    "Replies Sent",
+    "Reminders Created",
+    "Reminders Cleared",
+]
+
+
+def _get_usage_sheet():
+    """Get or create the Usage worksheet."""
+    spreadsheet = client.open(SHEET_NAME)
+    try:
+        return spreadsheet.worksheet("Usage")
+    except gspread.exceptions.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title="Usage", rows=400, cols=len(USAGE_HEADERS))
+        ws.update(range_name="A1", values=[USAGE_HEADERS])
+        ws.format("A1:N1", {"textFormat": {"bold": True}})
+        print("[Usage] Created 'Usage' worksheet.")
+        return ws
+
+
+def _get_today_row(ws) -> int | None:
+    """Find today's row in the Usage sheet. Returns row number or None."""
+    from datetime import date
+    today_str = date.today().isoformat()
+    try:
+        cell = ws.find(today_str, in_column=1)
+        return cell.row if cell else None
+    except gspread.exceptions.CellNotFound:
+        return None
+
+
+def log_usage_event(event_type: str, category: str = ""):
+    """Increment a counter in today's Usage row.
+
+    event_type: 'received', 'processed', 'draft', 'sent', 'reminder_add', 'reminder_clear'
+    category: email category (for 'processed' events)
+    """
+    from datetime import date
+
+    try:
+        ws = _get_usage_sheet()
+        today_str = date.today().isoformat()
+        row_num = _get_today_row(ws)
+
+        if not row_num:
+            # Create today's row with zeros
+            new_row = [today_str] + [0] * (len(USAGE_HEADERS) - 1)
+            ws.append_row(new_row, value_input_option="RAW")
+            row_num = _get_today_row(ws)
+            if not row_num:
+                print("[Usage] Could not find newly created row.")
+                return
+
+        # Column mapping (1-indexed)
+        col_map = {
+            "received": 2,       # B: Emails Received
+            "processed": 3,      # C: Emails Processed
+            "draft": 11,         # K: Replies Drafted by Agent
+            "sent": 12,          # L: Replies Sent
+            "reminder_add": 13,  # M: Reminders Created
+            "reminder_clear": 14,# N: Reminders Cleared
+        }
+
+        # Category columns
+        cat_col_map = {
+            "job": 4,            # D
+            "personal": 5,       # E
+            "business": 6,       # F
+            "bank": 7,           # G
+            "study": 8,          # H
+            "advertisement": 9,  # I
+            "spam": 10,          # J
+        }
+
+        # Increment the main event counter
+        if event_type in col_map:
+            col = col_map[event_type]
+            current = ws.cell(row_num, col).value
+            ws.update_cell(row_num, col, int(current or 0) + 1)
+
+        # Increment the category counter for 'processed' events
+        if event_type == "processed" and category in cat_col_map:
+            cat_col = cat_col_map[category]
+            current = ws.cell(row_num, cat_col).value
+            ws.update_cell(row_num, cat_col, int(current or 0) + 1)
+
+    except Exception as e:
+        print(f"[Usage] Error logging {event_type}: {e}")
