@@ -225,13 +225,12 @@ def sheet_operator_node(state: AgentState):
             sheet.append_row(row_values)
             print(f"   ✅ SUCCESS: Appended new thread {state.get('thread_id')}")
         else:
-            try:
-                cell = sheet.find(str(state.get("thread_id")))
+            cell = sheet.find(str(state.get("thread_id")))
+            if cell:
                 range_name = f"K{cell.row}:T{cell.row}"
-                # The update method requires a list of lists
                 sheet.update(range_name=range_name, values=[row_values[10:]])
                 print(f"   ✅ SUCCESS: Updated existing thread at row {cell.row}")
-            except gspread.exceptions.CellNotFound:
+            else:
                 sheet.append_row(row_values)
                 print("   ⚠️ Thread ID not found for update, appended as new.")
             

@@ -266,6 +266,14 @@ def _route_job_email(email_data: dict, final: dict):
     stage = extracted.get("Current Stage", "")
     priority = extracted.get("Priority", "Medium")
 
+    # Normalize bad extractor output — "Not Provided" or empty means the LLM
+    # couldn't parse the field.  Treat missing action as "Reply" so nothing
+    # that genuinely needs attention gets silently swallowed.
+    if action_type in ("Not Provided", "N/A", ""):
+        action_type = "Reply"
+    if company in ("Not Provided", "N/A", ""):
+        company = extracted.get("Sender Name", "Unknown")
+
     # ATS confirmations and rejections are already in the sheet — no notification needed
     if action_type == "None" or final_status == "Rejected":
         print(f"   Logged silently ({final_status or 'no action'}).")
