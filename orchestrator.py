@@ -274,6 +274,30 @@ def _route_job_email(email_data: dict, final: dict):
     if company in ("Not Provided", "N/A", ""):
         company = extracted.get("Sender Name", "Unknown")
 
+    # ── Rejection keyword fallback ──────────────────────────────────────────
+    # LLM sometimes misses soft rejection language.  Check the email body
+    # and subject for common rejection phrases when the extractor didn't
+    # already flag it as Rejected.
+    if final_status != "Rejected":
+        _body = (email_data.get("body", "") + " " + email_data.get("subject", "")).lower()
+        _reject_phrases = [
+            "not moving forward", "decided to pursue other",
+            "position has been filled", "will not be proceeding",
+            "decided not to move forward", "unable to offer you",
+            "not a fit at this time", "not selected",
+            "other candidates whose qualifications",
+            "we have decided to move on", "we won't be moving forward",
+            "unfortunately we will not", "regret to inform",
+            "we are unable to move forward",
+            "after careful consideration",
+        ]
+        if any(phrase in _body for phrase in _reject_phrases):
+            final_status = "Rejected"
+            extracted["Final Status"] = "Rejected"
+            if action_type == "Reply":
+                action_type = "None"
+            print(f"   [fallback] Detected rejection via keyword match")
+
     # ATS confirmations and rejections are already in the sheet — no notification needed
     if action_type == "None" or final_status == "Rejected":
         print(f"   Logged silently ({final_status or 'no action'}).")
