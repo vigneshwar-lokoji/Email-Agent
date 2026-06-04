@@ -87,7 +87,7 @@ def _get_tracker_rows() -> str:
                 "company": r.get("Company Name", ""),
                 "job_title": r.get("Job Title", ""),
                 "sender_email": r.get("Sender Email", ""),
-                "gmail_thread_id": r.get("thread_id", ""),
+                "gmail_thread_id": r.get("Thread ID", ""),
             }
             for i, r in enumerate(records)
         ]

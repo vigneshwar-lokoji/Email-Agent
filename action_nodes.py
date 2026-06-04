@@ -221,15 +221,33 @@ def sheet_operator_node(state: AgentState):
         decision = state.get("thread_decision", "NEW")
 
         if decision == "NEW":
-            # Removed value_input_option to prevent API conflict
             sheet.append_row(row_values)
             print(f"   ✅ SUCCESS: Appended new thread {state.get('thread_id')}")
         else:
-            cell = sheet.find(str(state.get("thread_id")))
-            if cell:
-                range_name = f"K{cell.row}:T{cell.row}"
+            # Use matched_row_id from the resolver (the actual sheet row number).
+            # Fall back to thread_id search, then append as new.
+            matched_row = state.get("matched_row_id")
+            target_row = None
+
+            if matched_row:
+                try:
+                    target_row = int(matched_row)
+                except (ValueError, TypeError):
+                    target_row = None
+
+            # Fallback: search by thread_id in column A
+            if not target_row:
+                cell = sheet.find(str(state.get("thread_id")))
+                if cell:
+                    target_row = cell.row
+
+            if target_row:
+                # Update columns K-T (stage, status, action, etc.) and
+                # overwrite thread_id in column A so future lookups work
+                sheet.update_cell(target_row, 1, str(state.get("thread_id", "N/A")))
+                range_name = f"K{target_row}:T{target_row}"
                 sheet.update(range_name=range_name, values=[row_values[10:]])
-                print(f"   ✅ SUCCESS: Updated existing thread at row {cell.row}")
+                print(f"   ✅ SUCCESS: Updated existing thread at row {target_row}")
             else:
                 sheet.append_row(row_values)
                 print("   ⚠️ Thread ID not found for update, appended as new.")
