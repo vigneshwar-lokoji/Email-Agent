@@ -290,6 +290,10 @@ def _route_job_email(email_data: dict, final: dict):
             "unfortunately we will not", "regret to inform",
             "we are unable to move forward",
             "after careful consideration",
+            "won't be able to move you forward",
+            "not able to move forward",
+            "move forward with your candidacy",
+            "aren't able to move forward",
         ]
         if any(phrase in _body for phrase in _reject_phrases):
             final_status = "Rejected"
@@ -297,6 +301,19 @@ def _route_job_email(email_data: dict, final: dict):
             if action_type == "Reply":
                 action_type = "None"
             print(f"   [fallback] Detected rejection via keyword match")
+
+            # The sheet was already written by the graph pipeline with wrong
+            # status.  Patch columns K-M (Current Stage, Rounds Completed,
+            # Final Status) in the existing row so the tracker is correct.
+            try:
+                from action_nodes import client, SHEET_NAME
+                _sheet = client.open(SHEET_NAME).sheet1
+                _cell = _sheet.find(str(email_data.get("thread_id", "")))
+                if _cell:
+                    _sheet.update_cell(_cell.row, 13, "Rejected")  # col M = Final Status
+                    print(f"   [fallback] Updated sheet row {_cell.row} → Rejected")
+            except Exception as e:
+                print(f"   [fallback] Sheet update error: {e}")
 
     # ATS confirmations and rejections are already in the sheet — no notification needed
     if action_type == "None" or final_status == "Rejected":
