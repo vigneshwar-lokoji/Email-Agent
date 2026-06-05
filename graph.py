@@ -89,7 +89,9 @@ CHECKPOINT_DB = "inbox_agent_checkpoints.db"
 
 
 def build_app():
-    conn = sqlite3.connect(CHECKPOINT_DB, check_same_thread=False)
+    conn = sqlite3.connect(CHECKPOINT_DB, check_same_thread=False, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     memory = SqliteSaver(conn)
     return builder.compile(checkpointer=memory)
 

@@ -17,6 +17,22 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 from graph import app
+
+
+def _run_async(coro):
+    """Run an async coroutine from sync code, whether or not an event loop exists."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        # We're inside an async context — schedule on the existing loop
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result(timeout=30)
+    else:
+        return asyncio.run(coro)
 from action_nodes import log_usage_event
 from gmail_service import (
     get_gmail_service,
@@ -177,7 +193,7 @@ def _run_graph(email_data: dict) -> dict:
 def _log_email(email_data: dict, category: str, action: str):
     """Log every email to both SQLite (email_log) and Google Sheet (Usage tab)."""
     try:
-        asyncio.run(log_email_processed(
+        _run_async(log_email_processed(
             gmail_message_id=email_data.get("message_id", ""),
             sender_email=email_data.get("sender_email", ""),
             subject=email_data.get("subject", ""),
@@ -198,7 +214,7 @@ def run_phase_a(email_data: dict):
     print(f"[Phase A] {email_data['subject']}")
 
     # If we previously replied to this thread, mark that we got a response
-    asyncio.run(mark_response_received(email_data["thread_id"]))
+    _run_async(mark_response_received(email_data["thread_id"]))
 
     final = _run_graph(email_data)
     extracted = final.get("extracted_data", {})
@@ -325,7 +341,7 @@ def _route_job_email(email_data: dict, final: dict):
         _notify_and_ask(email_data, extracted, category="job")
     else:
         print(f"   Queuing job reminder ({action_type}) for {company}")
-        asyncio.run(
+        _run_async(
             _queue_reminder(email_data, company, stage, priority, action_type)
         )
 
@@ -402,7 +418,7 @@ def _notify_and_ask(
     )
     tg_message_id = resp.get("result", {}).get("message_id", 0)
 
-    asyncio.run(store_pending_decision(
+    _run_async(store_pending_decision(
         gmail_thread_id=email_data["thread_id"],
         gmail_message_id=email_data["message_id"],
         sender_email=email_data["sender_email"],
@@ -715,7 +731,7 @@ def _draft_and_notify(email_data: dict, extracted: dict, final_state: dict):
     )
     tg_message_id = resp.get("result", {}).get("message_id", 0)
 
-    asyncio.run(
+    _run_async(
         store_pending_approval(
             gmail_thread_id=email_data["thread_id"],
             gmail_message_id=email_data["message_id"],
@@ -776,7 +792,7 @@ def _draft_and_notify_general(email_data: dict, summary: str, category: str):
     )
     tg_message_id = resp.get("result", {}).get("message_id", 0)
 
-    asyncio.run(
+    _run_async(
         store_pending_approval(
             gmail_thread_id=email_data["thread_id"],
             gmail_message_id=email_data["message_id"],
@@ -1440,7 +1456,7 @@ def run_batch_phase_a() -> int:
         # Already in an event loop — init_db was called by main()
     except RuntimeError:
         # No event loop — we're in the Pub/Sub thread
-        asyncio.run(init_db())
+        _run_async(init_db())
     service = get_gmail_service()
     emails = fetch_new_emails(service)
 
