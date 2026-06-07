@@ -331,6 +331,37 @@ def _route_job_email(email_data: dict, final: dict):
             except Exception as e:
                 print(f"   [fallback] Sheet update error: {e}")
 
+    # ── Action keyword fallback ──────────────────────────────────────────────
+    # LLM sometimes marks outreach/screening emails as "None" (informational).
+    # Check the email body for phrases that clearly indicate action is needed.
+    if action_type == "None" and final_status != "Rejected":
+        _body = (email_data.get("body", "") + " " + email_data.get("subject", "")).lower()
+
+        # Screening / task links
+        _task_phrases = [
+            "complete a quick screening", "start screening",
+            "complete your profile", "complete your application",
+            "click here to submit", "log in to", "take the assessment",
+            "complete the assessment", "online assessment",
+            "coding challenge", "take-home", "hackerrank",
+            "complete this form",
+        ]
+        # Reply-needed phrases
+        _reply_phrases = [
+            "let me know your preferred time", "when are you available",
+            "are you interested", "please confirm", "reply with",
+            "send me your", "share your availability",
+            "can you confirm", "please respond", "at your earliest convenience",
+            "looking forward to your response",
+        ]
+
+        if any(p in _body for p in _task_phrases):
+            action_type = "Submit Task"
+            print(f"   [fallback] Detected actionable task via keyword match")
+        elif any(p in _body for p in _reply_phrases):
+            action_type = "Reply"
+            print(f"   [fallback] Detected reply-needed via keyword match")
+
     # ATS confirmations and rejections are already in the sheet — no notification needed
     if action_type == "None" or final_status == "Rejected":
         print(f"   Logged silently ({final_status or 'no action'}).")
