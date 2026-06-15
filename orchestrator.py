@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-from graph import app
+from graph import get_fresh_app
 
 
 def _run_async(coro):
@@ -170,6 +170,7 @@ def _tg(method: str, **kwargs) -> dict:
 
 def _run_graph(email_data: dict) -> dict:
     """Run the classification graph for one email. Returns final state."""
+    _app = get_fresh_app()   # fresh DB connection per run — avoids shared-conn locking
     initial_state = {
         "thread_id": email_data["thread_id"],
         "date_received": email_data["date_received"],
@@ -181,11 +182,11 @@ def _run_graph(email_data: dict) -> dict:
     }
     config = {"configurable": {"thread_id": email_data["thread_id"]}}
 
-    for output in app.stream(initial_state, config=config):
+    for output in _app.stream(initial_state, config=config):
         for key in output:
             print(f"   {key}")
 
-    return app.get_state(config).values
+    return _app.get_state(config).values
 
 
 # ── Phase A: classify + route ──────────────────────────────────────────────────

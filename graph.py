@@ -92,11 +92,21 @@ def build_app():
     conn = sqlite3.connect(CHECKPOINT_DB, check_same_thread=False, timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA synchronous=NORMAL")
     memory = SqliteSaver(conn)
     return builder.compile(checkpointer=memory)
 
 
+# Module-level app; the connection is shared but WAL + busy_timeout
+# means concurrent writers wait up to 30s instead of failing instantly.
 app = build_app()
+
+
+def get_fresh_app():
+    """Return a compiled app with a fresh DB connection.
+    Use this when the module-level app's connection may be stale or locked.
+    """
+    return build_app()
 
 
 # ── Quick test runner ──────────────────────────────────────────────────────────

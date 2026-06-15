@@ -343,7 +343,7 @@ def _get_today_row(ws) -> int | None:
     try:
         cell = ws.find(today_str, in_column=1)
         return cell.row if cell else None
-    except gspread.exceptions.CellNotFound:
+    except Exception:
         return None
 
 
