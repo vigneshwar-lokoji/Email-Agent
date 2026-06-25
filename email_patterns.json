@@ -1,0 +1,158 @@
+{
+  "_comment": "Rule book for email pattern matching. The agent checks these BEFORE deciding how to route an email. Add new patterns here — no code changes needed.",
+  "_format": {
+    "patterns": "List of substrings to match in email body+subject (case-insensitive, ANY match triggers the rule)",
+    "action_type": "Override Action Type: Reply | Submit Task | Send Documents | Schedule Interview | None",
+    "priority": "Override Priority: High | Medium | Low",
+    "notify": "true = send immediate Telegram notification, false = queue as reminder",
+    "label": "Optional note shown in logs"
+  },
+
+  "rules": [
+    {
+      "label": "Missing documents requested",
+      "patterns": [
+        "missing these documents",
+        "missing the following documents",
+        "we are missing",
+        "please send your",
+        "please attach",
+        "please email your",
+        "send the following",
+        "submit the following documents",
+        "we still need",
+        "we need the following",
+        "incomplete application",
+        "application is incomplete",
+        "can be sent to",
+        "documents for your application"
+      ],
+      "action_type": "Send Documents",
+      "priority": "High",
+      "notify": true
+    },
+    {
+      "label": "Recruiter asking questions / needs reply",
+      "patterns": [
+        "at your earliest convenience",
+        "can you please confirm",
+        "could you please confirm",
+        "please confirm the following",
+        "please respond",
+        "looking forward to your response",
+        "let me know your preferred",
+        "please let us know",
+        "reply with your",
+        "when are you available",
+        "are you still interested",
+        "are you available",
+        "please verify",
+        "please provide"
+      ],
+      "action_type": "Reply",
+      "priority": "High",
+      "notify": true
+    },
+    {
+      "label": "Virtual recruiter screening / assessment",
+      "patterns": [
+        "complete a quick screening",
+        "start screening",
+        "virtual recruiter",
+        "ai recruiter",
+        "automated screening",
+        "complete your screening",
+        "screening call",
+        "take the assessment",
+        "complete the assessment",
+        "complete your profile",
+        "online assessment",
+        "hackerrank",
+        "codility",
+        "take-home assignment",
+        "coding challenge"
+      ],
+      "action_type": "Submit Task",
+      "priority": "High",
+      "notify": true
+    },
+    {
+      "label": "Scheduling with a booking link",
+      "patterns": [
+        "calendly.com",
+        "goodtime.io",
+        "greenhouse.io/interviews",
+        "hirevue.com",
+        "myinterview.com",
+        "schedule.google.com",
+        "schedule an interview",
+        "book a time",
+        "pick a time",
+        "select a time slot"
+      ],
+      "action_type": "Schedule Interview",
+      "priority": "High",
+      "notify": true
+    },
+    {
+      "label": "Offer letter / negotiation",
+      "patterns": [
+        "offer letter",
+        "we are pleased to offer",
+        "formal offer",
+        "compensation package",
+        "start date",
+        "sign your offer",
+        "accept the offer"
+      ],
+      "action_type": "Negotiate",
+      "priority": "High",
+      "notify": true
+    },
+    {
+      "label": "Rejection (soft language)",
+      "patterns": [
+        "not moving forward",
+        "decided to pursue other",
+        "position has been filled",
+        "will not be proceeding",
+        "decided not to move forward",
+        "unable to offer you",
+        "not a fit at this time",
+        "not selected",
+        "other candidates whose qualifications",
+        "we have decided to move on",
+        "unfortunately we will not",
+        "regret to inform",
+        "we are unable to move forward",
+        "won't be able to move you forward",
+        "aren't able to move forward",
+        "move forward with your candidacy",
+        "after careful consideration",
+        "not be moving forward with your application",
+        "thank you for your time and interest"
+      ],
+      "action_type": "None",
+      "final_status": "Rejected",
+      "priority": "Low",
+      "notify": false
+    },
+    {
+      "label": "ATS confirmation / application received",
+      "patterns": [
+        "application has been received",
+        "application has been submitted",
+        "thank you for applying",
+        "we received your application",
+        "we've received your application",
+        "your application is under review",
+        "application is being reviewed",
+        "you will hear from us",
+        "we will be in touch"
+      ],
+      "action_type": "None",
+      "priority": "Low",
+      "notify": false
+    }
+  ]
+}

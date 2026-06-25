@@ -10,6 +10,7 @@ Both notifications show up in your Telegram. You choose what to do with each.
 """
 import os
 import re
+import json
 import asyncio
 import requests
 from dotenv import load_dotenv
@@ -17,6 +18,35 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 from graph import get_fresh_app
+
+
+# ── Pattern rule book ──────────────────────────────────────────────────────────
+
+_PATTERNS_FILE = os.path.join(os.path.dirname(__file__), "email_patterns.json")
+_PATTERN_RULES: list[dict] = []
+
+def _load_patterns():
+    global _PATTERN_RULES
+    try:
+        with open(_PATTERNS_FILE, "r") as f:
+            data = json.load(f)
+        _PATTERN_RULES = data.get("rules", [])
+        print(f"[Patterns] Loaded {len(_PATTERN_RULES)} rules from email_patterns.json")
+    except Exception as e:
+        print(f"[Patterns] Failed to load email_patterns.json: {e}")
+        _PATTERN_RULES = []
+
+_load_patterns()
+
+
+def _match_patterns(email_body: str, subject: str) -> dict | None:
+    """Check email body+subject against the pattern rule book.
+    Returns the first matching rule dict, or None if no match."""
+    haystack = (email_body + " " + subject).lower()
+    for rule in _PATTERN_RULES:
+        if any(p.lower() in haystack for p in rule.get("patterns", [])):
+            return rule
+    return None
 
 
 def _run_async(coro):
@@ -283,93 +313,58 @@ def _route_job_email(email_data: dict, final: dict):
     stage = extracted.get("Current Stage", "")
     priority = extracted.get("Priority", "Medium")
 
-    # Normalize bad extractor output — "Not Provided" or empty means the LLM
-    # couldn't parse the field.  Treat missing action as "Reply" so nothing
-    # that genuinely needs attention gets silently swallowed.
+    # Normalize bad extractor output
     if action_type in ("Not Provided", "N/A", ""):
         action_type = "Reply"
     if company in ("Not Provided", "N/A", ""):
         company = extracted.get("Sender Name", "Unknown")
 
-    # ── Rejection keyword fallback ──────────────────────────────────────────
-    # LLM sometimes misses soft rejection language.  Check the email body
-    # and subject for common rejection phrases when the extractor didn't
-    # already flag it as Rejected.
-    if final_status != "Rejected":
-        _body = (email_data.get("body", "") + " " + email_data.get("subject", "")).lower()
-        _reject_phrases = [
-            "not moving forward", "decided to pursue other",
-            "position has been filled", "will not be proceeding",
-            "decided not to move forward", "unable to offer you",
-            "not a fit at this time", "not selected",
-            "other candidates whose qualifications",
-            "we have decided to move on", "we won't be moving forward",
-            "unfortunately we will not", "regret to inform",
-            "we are unable to move forward",
-            "after careful consideration",
-            "won't be able to move you forward",
-            "not able to move forward",
-            "move forward with your candidacy",
-            "aren't able to move forward",
-        ]
-        if any(phrase in _body for phrase in _reject_phrases):
-            final_status = "Rejected"
-            extracted["Final Status"] = "Rejected"
-            if action_type == "Reply":
-                action_type = "None"
-            print(f"   [fallback] Detected rejection via keyword match")
+    # ── Pattern rule book override ──────────────────────────────────────────
+    # Check email_patterns.json before trusting the LLM output.
+    # The rule book wins when it matches — it's always more up-to-date.
+    matched_rule = _match_patterns(email_data.get("body", ""), email_data.get("subject", ""))
+    if matched_rule:
+        rule_action = matched_rule.get("action_type")
+        rule_status = matched_rule.get("final_status")
+        rule_notify = matched_rule.get("notify", True)
+        rule_label  = matched_rule.get("label", "unknown rule")
 
-            # The sheet was already written by the graph pipeline with wrong
-            # status.  Patch columns K-M (Current Stage, Rounds Completed,
-            # Final Status) in the existing row so the tracker is correct.
+        print(f"   [patterns] Matched rule: '{rule_label}'")
+
+        # Apply rule overrides
+        if rule_action:
+            action_type = rule_action
+        if rule_status:
+            final_status = rule_status
+            extracted["Final Status"] = rule_status
+        if matched_rule.get("priority"):
+            priority = matched_rule["priority"]
+
+        # If rule says rejection — patch the sheet row too
+        if rule_status == "Rejected":
             try:
                 from action_nodes import client, SHEET_NAME
                 _sheet = client.open(SHEET_NAME).sheet1
                 _cell = _sheet.find(str(email_data.get("thread_id", "")))
                 if _cell:
-                    _sheet.update_cell(_cell.row, 13, "Rejected")  # col M = Final Status
-                    print(f"   [fallback] Updated sheet row {_cell.row} → Rejected")
+                    _sheet.update_cell(_cell.row, 13, "Rejected")
+                    print(f"   [patterns] Updated sheet row {_cell.row} → Rejected")
             except Exception as e:
-                print(f"   [fallback] Sheet update error: {e}")
+                print(f"   [patterns] Sheet update error: {e}")
 
-    # ── Action keyword fallback ──────────────────────────────────────────────
-    # LLM sometimes marks outreach/screening emails as "None" (informational).
-    # Check the email body for phrases that clearly indicate action is needed.
-    if action_type == "None" and final_status != "Rejected":
-        _body = (email_data.get("body", "") + " " + email_data.get("subject", "")).lower()
+        # If rule says don't notify — respect that
+        if not rule_notify:
+            print(f"   Logged silently via pattern rule ({rule_label}).")
+            return
 
-        # Screening / task links
-        _task_phrases = [
-            "complete a quick screening", "start screening",
-            "complete your profile", "complete your application",
-            "click here to submit", "log in to", "take the assessment",
-            "complete the assessment", "online assessment",
-            "coding challenge", "take-home", "hackerrank",
-            "complete this form",
-        ]
-        # Reply-needed phrases
-        _reply_phrases = [
-            "let me know your preferred time", "when are you available",
-            "are you interested", "please confirm", "reply with",
-            "send me your", "share your availability",
-            "can you confirm", "please respond", "at your earliest convenience",
-            "looking forward to your response",
-        ]
-
-        if any(p in _body for p in _task_phrases):
-            action_type = "Submit Task"
-            print(f"   [fallback] Detected actionable task via keyword match")
-        elif any(p in _body for p in _reply_phrases):
-            action_type = "Reply"
-            print(f"   [fallback] Detected reply-needed via keyword match")
-
-    # ATS confirmations and rejections are already in the sheet — no notification needed
+    # ATS confirmations and rejections — no notification needed
     if action_type == "None" or final_status == "Rejected":
         print(f"   Logged silently ({final_status or 'no action'}).")
         return
 
-    if action_type == "Reply":
-        print(f"   Reply needed → notifying (job) for {company}")
+    # Send Documents always needs immediate notification (not just a reminder)
+    if action_type in ("Reply", "Send Documents"):
+        print(f"   {action_type} needed → notifying (job) for {company}")
         _notify_and_ask(email_data, extracted, category="job")
     else:
         print(f"   Queuing job reminder ({action_type}) for {company}")
