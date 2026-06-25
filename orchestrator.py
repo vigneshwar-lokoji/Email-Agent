@@ -1211,6 +1211,8 @@ async def send_morning_brief():
             company = item.get("company") or item["sender_email"]
             from datetime import datetime, timezone
             sent_dt = datetime.fromisoformat(item["sent_at"].replace("Z", "+00:00"))
+            if sent_dt.tzinfo is None:
+                sent_dt = sent_dt.replace(tzinfo=timezone.utc)
             days_ago = (datetime.now(timezone.utc) - sent_dt).days
             lines.append(f"  • {company} — {days_ago} days, no reply")
         lines.append("")
@@ -1296,6 +1298,8 @@ async def check_response_nudge(hours: int = 3):
     for item in stale[:5]:
         from datetime import datetime, timezone
         created = datetime.fromisoformat(item["created_at"].replace("Z", "+00:00"))
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
         hours_ago = (now - created).total_seconds() / 3600
         subjects.append(f"  • _{item['subject']}_ ({_format_time(hours_ago * 60)} ago)")
@@ -1377,6 +1381,8 @@ async def check_followups(days: int = 5):
         # Calculate days since we sent
         from datetime import datetime, timezone
         sent_dt = datetime.fromisoformat(item["sent_at"].replace("Z", "+00:00"))
+        if sent_dt.tzinfo is None:
+            sent_dt = sent_dt.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
         days_ago = (now - sent_dt).days
 
@@ -1429,6 +1435,8 @@ async def handle_followup_draft(sent_reply_id: int):
     from datetime import datetime, timezone
 
     sent_dt = datetime.fromisoformat(item["sent_at"].replace("Z", "+00:00"))
+    if sent_dt.tzinfo is None:
+        sent_dt = sent_dt.replace(tzinfo=timezone.utc)
     days_ago = (datetime.now(timezone.utc) - sent_dt).days
 
     prompt = (
